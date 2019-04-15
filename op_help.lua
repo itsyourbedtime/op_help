@@ -1,16 +1,18 @@
 -- op-1 helper
---
+-- v0.0.2 @its_your_bedtime
 --
 -- manage tapes, records
 -- rename and move presets
 -- 2do - file move
 -- hold btn 1 to rename / move 
 
+local ui_utils = include('op_help/lib/ui_utils')
 local textentry = require "textentry"
 local UI = require "ui"
 local m_pos_x = {5,80}
 local m_pos_y = {35}
 local selected = 1
+local action = 1
 local backup_menu = false
 local presets_menu = false
 local main_menu = true
@@ -21,6 +23,7 @@ local c_pos_y = 60
 local lp_pos = 2
 local tape_pos_y = 10
 local bind_vals = {34, 100}
+local bind_vals2 = {14, 64, 110}
 local connected = false
 local transfer_active = false
 local transfer_completed = false
@@ -30,10 +33,9 @@ local current_folder = nil
 local info = nil
 local prev = 1
 local last_index = {}
+local folder_sel = false
 local db = {synth = {}, drum = {}, album = {},tape = {}}
 
-
---- hardware things
 local function init_folders()
   -- init folders if not exists
   if not util.file_exists(_path.audio .. "op-1") then
@@ -104,8 +106,6 @@ local function get_meta(file)
   return meta
 end
 
-
------ UI
 local function animation()
   -- menu positon
   if (backup_menu or presets_menu) then
@@ -136,11 +136,21 @@ local function animation()
     end
   end
   -- cursor position
-  if c_pos_x ~= bind_vals[selected] then
-    if c_pos_x <= bind_vals[selected] then
-      c_pos_x = util.clamp(c_pos_x + 2,bind_vals[selected]-20,bind_vals[selected])
-    elseif c_pos_x >= bind_vals[selected] then
-      c_pos_x = util.clamp(c_pos_x - 2,bind_vals[selected],bind_vals[selected]+20)
+  if main_menu or backup_menu then
+    if c_pos_x ~= bind_vals[selected] then
+      if c_pos_x <= bind_vals[selected] then
+        c_pos_x = util.clamp(c_pos_x + 2,bind_vals[selected]-20,bind_vals[selected])
+      elseif c_pos_x >= bind_vals[selected] then
+        c_pos_x = util.clamp(c_pos_x - 2,bind_vals[selected],bind_vals[selected]+20)
+      end
+    end
+  elseif presets_menu then
+    if c_pos_x ~= bind_vals2[action] then
+      if c_pos_x <= bind_vals2[action] then
+        c_pos_x = util.clamp(c_pos_x + 2,bind_vals2[action]-20,bind_vals2[action])
+      elseif c_pos_x >= bind_vals2[action] then
+        c_pos_x = util.clamp(c_pos_x - 2,bind_vals2[action],bind_vals2[selected]+20)
+      end
     end
   end
   -- progress bar animation
@@ -153,57 +163,55 @@ local function animation()
   end
 end
 
---[[local function move_file(?)
+local function move_file(dst)
   local src = info.path  .. info.name .. ".aif"
   print("selected folder", browser.entries[browser.index])
   --util.os_capture("sudo mv " .. src .. " " .. dst )
-  print('move' .. src .. " to " )--dst )
-end]]
+  print('move' .. src .. " to " ..  dst )
+end
 
-local function update_menu_entries()
-  --local last_index = 1
-  if depth == 0 then -- main menu
+local function update_menu_entries(level, synth, fsel)
+  local list = {}
+  local op_presets = ""
+  
+  if synth == 1 then 
+    list = db.synth 
+    op_presets = "/media/usb/synth/" 
+  elseif synth == 2 then 
+    list = db.drum
+    op_presets = "/media/usb/drum/" 
+  end
+  
+  if fsel then 
+    level = util.clamp(level,0,2) 
+  else 
+    level = util.clamp(level,0,3) 
+  end
+  
+  if level == 0 then 
     presets_menu = not presets_menu
     main_menu = not main_menu
-  elseif depth == 1 then
-    --browser.entries = {}
+  elseif level == 1 then
     browser.entries = {"Synth", "Drum"}
-  elseif depth == 2 then
-    prev = 1
+    last_index[level] = util.clamp(browser.index,1,2)
+  elseif level == 2 then
     browser.entries = {}
-    last_index[depth] = browser.index
-    if browser.index == 1 then
-      for i = 1,#db.synth do
-        table.insert(browser.entries, db.synth[i])
-      end
-    elseif browser.index == 2 then
-      prev = 2
-      for i = 1,#db.drum do
-        table.insert(browser.entries, db.drum[i])
-      end
+    for i = 1,#list do
+      table.insert(browser.entries, list[i])
     end
-  elseif depth == 3 then
+  elseif level == 3 then
     browser.entries = {}
-    last_index[depth] = browser.index
-    print(prev .. " " .. last_index[depth])
-    if prev == 1 then -- synth
-      current_folder = "/media/usb/synth/" .. db.synth[last_index[depth]]
-      for i = 1,#db.synth[db.synth[browser.index]] do
-        table.insert(browser.entries, db.synth[db.synth[browser.index]][i])
-      end
-    elseif prev == 2 then -- drum
-      current_folder = "/media/usb/drum/" .. db.drum[last_index[depth]]
-      for i = 1,#db.drum[db.drum[browser.index]] do
-        table.insert(browser.entries, db.drum[db.drum[browser.index]][i])
-      end
+    last_index[level] = browser.index
+    current_folder = op_presets .. list[last_index[level]]
+    for i = 1,#list[list[browser.index]] do
+      table.insert(browser.entries, list[list[browser.index]][i])
     end
     browser.index = 1
   end
-  if depth == 3 then
+  if level == 3 then
     info = get_meta(current_folder .. browser.entries[browser.index])
   end
 end
-
 
 local function rename_file(txt)
   if txt then
@@ -221,15 +229,17 @@ local function rename_file(txt)
 end
 
 local function folder_select()
-  depth = 2
-  update_menu_entries()
+  update_menu_entries(1,last_index[1],true)
 end
 
-local function file_action(file)
-  if selected == 1 then
-    textentry.enter(rename_file, string.sub(db.synth[db.synth[last_index[2]]][last_index[3]],1,-5))
-  elseif selected == 2 then
+local function file_action(sel,file)
+  if sel == 1 then
+    local name = string.sub(db.synth[db.synth[last_index[2]]][last_index[3]],1,-5)
+    textentry.enter(rename_file, name)
+  elseif sel == 2 then
     folder_select()
+  elseif sel == 3 then 
+    remove_file()
   end
 end
 
@@ -251,15 +261,17 @@ local function draw_meta()
   screen.rect(70,1,80,30)
   screen.fill()
   screen.level(6)
+  screen.move(80,10)
+  screen.text("ENG:")
   screen.move(128,10)
-  screen.text_right("type: " .. info.type)
+  screen.text_right(info.type)
   screen.move(128,20)
-  screen.text_right("effect: " .. info.fx)
+  screen.text_right("FX: " .. info.fx)
   screen.move(128,30)
-  screen.text_right("lfo: " .. info.lfo)
+  screen.text_right("LFO: " .. info.lfo)
 end
 
-local function draw_progress(x,y)
+ function draw_progress(x,y)
   screen.level(6)
   screen.rect(x,y,100,5)
   screen.stroke()
@@ -272,171 +284,8 @@ local function draw_progress(x,y)
   end
 end
 
-local function draw_edit_icon(x,y)
-   --- text
-  screen.level(selected == 1 and 2 or 1)
-  screen.rect(x+12,y+12,36,10)
-  screen.fill()
-  screen.level(0)
-  screen.move(x+15,y+20)
-  screen.text("PRESETS")
-  screen.stroke()
-  -- pencil
-  screen.level(1)
-  screen.line_width(1.5)
-  screen.move(x+2,y)
-  screen.line_rel(10,10)
-  screen.move(x,y+1)
-  screen.line_rel(10,10)
-  screen.stroke()
-  --
-  screen.level(6)
-  screen.line_width(1)
-  screen.move(x,y-1)
-  screen.line_rel(3,1)
-  screen.stroke()
-  screen.move(x,y)
-  screen.line_rel(0,3)
-  screen.stroke()
-  screen.move(x+1,y+1)
-  screen.line_rel(11,11)
-  screen.move(x + 3,y)
-  screen.line_rel(9,9)
-  screen.move(x,y+3)
-  screen.line_rel(10,10)
-  screen.stroke()
-  screen.move(x,y)
-  screen.line_rel(1,1)
-  screen.stroke()
-  screen.move(x+13,y+9)
-  screen.line_rel(0, 4)
-  screen.line_rel(-3, -2)
-  screen.stroke()
-  screen.move(x+9,y+13)
-  screen.line_rel(3,0)
-  screen.line_rel(0,-3)
-  screen.stroke()
-end
-
-
-local function draw_sync_icon(x,y)
-  screen.level(6)
-  screen.circle(x,y+5,8)
-  screen.fill()
-
-  screen.level(0)
-  screen.circle(x,y+5,5.5)
-  screen.fill()
-  screen.line_width(7)
-  screen.move(x-10,y-5)
-  screen.line_rel(20,20)
-  screen.stroke()
-
-  screen.line_width(1)
-  screen.level(6)
-  screen.move(x-12,y+3)
-  screen.line_rel(6,-5)
-  screen.line_rel(5,5)
-  screen.fill()
-
-  screen.level(6)
-  screen.move(x+12,y+7)
-  screen.line_rel(-4,5)
-  screen.line_rel(-5,-5)
-  screen.fill()
-
-  screen.level(selected == 2 and 2 or 1)
-  screen.rect(x+6,y+12,33,10)
-  screen.fill()
-  screen.level(0)
-  screen.move(x+9,y+20)
-  screen.text("BACKUP")
-end
-
-local function draw_cursor(x, y)
-  screen.level(9)
-  screen.move(x-3,y+3)
-  screen.line(x,y)
-  screen.line_rel(3,3)
-  screen.stroke()
-end
-
-local function draw_op(x, y)
-  local c1 = 0
-  local c2 = 0
-  screen.level(connected and 6 or 2 )
-  screen.rect(x, y, 63, 22)
-  screen.fill()
-  screen.level(0)
-  screen.rect(x,y+21,1,1)
-  screen.rect(x+62,y,1,1)
-  screen.rect(x,y,1,1)
-  screen.rect(x+62,y+21,1,1)
-  screen.fill()
-
-  screen.level(1)
-  screen.rect(x + 17 ,y + 2, 12, 5)
-  screen.fill()
-  screen.stroke()
-  --- todo loop
-  screen.circle(x + 12, y + 5, 2)
-  screen.fill()
-  for i=1,4 do
-    screen.circle((x + 29) + (i *6), y + 5, 2)
-    screen.fill()
-  end
-  screen.fill()
-  screen.pixel(x + 2, y + 2)
-  screen.fill()
-  screen.pixel(x + 4, y + 2)
-  screen.fill()
-  screen.pixel(x + 6, y + 2)
-  screen.fill()
-  screen.pixel(x + 2, y + 4)
-  screen.fill()
-  screen.pixel(x + 4, y + 4)
-  screen.fill()
-  screen.pixel(x + 6, y + 4)
-  screen.fill()
-  screen.pixel(x + 2, y + 6)
-  screen.fill()
-  screen.pixel(x + 4, y + 6)
-  screen.fill()
-  screen.pixel(x + 6, y + 6)
-  screen.fill()
-
-  for i=1,15 do
-    screen.rect(x + (3 + c1), y + 10, 2, 2)
-    screen.stroke()
-    c1 = c1 + 4
-  end
-  for i=1,13 do
-    screen.rect(x + (11 + c2), y + 14, 2, 6)
-    screen.stroke()
-    c2 = c2 + 4
-  end
-
-  screen.rect(x + 3, y + 14, 2, 2)
-  screen.stroke()
-  screen.rect(x + 3, y + 18, 2, 2)
-  screen.stroke()
-  screen.rect(x + 7, y + 14, 2, 2)
-  screen.stroke()
-  screen.rect(x + 7, y + 18, 2, 2)
-  screen.stroke()
-
-  if connected then
-    screen.level(3)
-    screen.rect(x+63,y+10,4,3)
-    screen.fill()
-    screen.move(x+63,y+12)
-    screen.line(x+120,y+12)
-    screen.stroke()
-  end
-end
-
 local function draw_status(x, y)
-  draw_op(x-65, y - 2)
+  ui_utils.op_icon(x-65, y - 2, connected)
   if not connected then
   screen.level(9)
   screen.move(x-8,y+10)
@@ -444,141 +293,11 @@ local function draw_status(x, y)
   end
 end
 
-local function draw_album_icon()
-
-  screen.level(selected == 1 and 2 or 1)
-  screen.rect(12,46,36,10)
-  screen.fill()
-  screen.level(0)
-  screen.move(17,54)
-  screen.text("ALBUM")
-  screen.stroke()
-
-  screen.level(2)
-  screen.circle(30,20,15)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,14)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,13)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,12)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,11)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,10)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,9)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,8)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,7)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,6)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,5)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,4)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,3)
-  screen.stroke()
-  screen.level(4)
-  screen.circle(30,20,2)
-  screen.stroke()
-  screen.level(2)
-  screen.circle(30,20,1)
-  screen.stroke()
-  screen.level(2)
-  --- funky LP design
-  screen.rect(12,lp_pos,36,33)
-  screen.fill()
-  screen.level(1)
-  screen.move(14,lp_pos + 7)
-  screen.text("/////.")
-  screen.stroke()
-  screen.level(1)
-  screen.move(13,lp_pos + 15)
-  screen.text("...............")
-  screen.move(17,lp_pos + 16)
-  screen.text("...............")
-  screen.move(13,lp_pos + 13)
-  screen.text(".............")
-  screen.move(17,lp_pos + 18)
-  screen.text("...............")
-  screen.move(13,lp_pos + 14)
-  screen.text(".............")
-  screen.move(17,lp_pos + 17)
-  screen.text("............")
-  screen.stroke()
-
-end
-
-local function draw_tape_icon(x,y) -- 75,10
-  screen.level(selected == 2 and 2 or 1)
-  screen.rect(79,46,36,10)
-  screen.fill()
-  screen.level(0)
-  screen.move(88,54)
-  screen.text("TAPE")
-  screen.stroke()
-
-  screen.level(8)
-  screen.rect(x,y,45,25)
-  screen.fill()
-
-  screen.level(0)
-  screen.rect(x, y, 1, 1)
-  screen.rect(x + 44, y, 1, 1)
-  screen.rect(x, y + 24, 1, 1)
-  screen.rect(x + 44, y + 24, 1, 1)
-  screen.fill()
-
-  screen.level(2)
-  screen.rect(x + 2, y + 3, 41, 16)
-  screen.fill()
-
-  screen.level(8)
-  screen.rect(x + 2, y + 3, 1, 1)
-  screen.rect(x + 42, y + 3, 1, 1)
-  screen.rect(x + 2, y + 18, 1, 1)
-  screen.rect(x + 42, y+18, 1, 1)
-  screen.fill()
-
-  screen.level(4)
-  screen.rect(x + 8, y + 22,29,3)
-  screen.rect(x + 2,y+ 22,1,1)
-  screen.rect(x + 42 ,y + 22,1,1)
-  screen.fill()
-
-  screen.level(6)
-  screen.circle(x + 12 , y+ 11,4)
-  screen.circle(x + 33 ,y + 11,4)
-  screen.fill()
-  screen.level(2)
-  screen.circle(x + 12,y + 11,1)
-  screen.circle(x + 33,y+11,1)
-  screen.fill()
-  screen.level(3)
-  screen.rect(x + 17,y + 9,11,4)
-  screen.fill()
-end
-
 local function draw_options(x,y)
-  for i=1,2 do
-    screen.level(selected == i and 9 or 3)
-    screen.move(i==1 and 20 or i == 2 and 90, y)
-    screen.text(i == 1 and "Rename" or "----")
+  for i=1,3 do
+    screen.level(action == i and 9 or 3)
+    screen.move(i==1 and 0 or i == 2 and 55 or i == 3 and 100, y)
+    screen.text(i == 1 and "Rename" or i == 2 and "Move" or "Delete")
   end
 end
 
@@ -589,13 +308,17 @@ function enc(n,d)
     norns.encoders.set_accel(i,false)
   end
   if n == 1 then
-    selected = util.clamp(selected + d, 1, 2)
+    if not presets_menu then 
+      selected = util.clamp(selected + d, 1, 2)
+    elseif presets_menu and depth == 3 then
+      action = util.clamp(action + d, 1,3)
+    end
     if c_pos_x ~= bind_vals[trk] then
       c_pos_x = (c_pos_x + d)
     end
   elseif n == 2 then
     if presets_menu then
-      browser:set_index_delta(d, false)
+      browser.index = util.clamp(browser.index + d,1,#browser.entries)
       if depth == 3 then
         info = get_meta(current_folder .. browser.entries[browser.index])
       end
@@ -607,16 +330,16 @@ function key(n,z)
   if z == 1 then
     if n == 1 then
       if presets_menu and depth == 3 then
-        file_action(info.path .. info.name .. ".aif")
+        file_action(action,info.path .. info.name .. ".aif")
       end
     elseif n == 2 then
       depth = util.clamp(depth - 1,0,3)
       if backup_menu then
         backup_menu = not backup_menu
-      elseif presets_menu then
-        browser.index = 1
+--      elseif presets_menu then
+--        browser.index = util.clamp(browser.index,1,#browser.entries)
       end
-      update_menu_entries()
+      update_menu_entries(depth, last_index[1], false)
     elseif n == 3 then
       if connected then
         if main_menu then
@@ -627,8 +350,8 @@ function key(n,z)
             backup_menu = true
           end
         elseif presets_menu and depth < 3 then
-          depth = util.clamp(depth + 1,0,3)
-          update_menu_entries()
+          depth = util.clamp(depth + 1,0,folder_sel and 2 or 3)
+          update_menu_entries(depth, last_index[1],false)
         end
       end
     end
@@ -639,10 +362,10 @@ function redraw()
   screen.clear()
   screen.level(3)
   draw_status(95,m_pos_y[1] - 30)
-  draw_edit_icon(m_pos_x[1],m_pos_y[1])
-  draw_sync_icon(m_pos_x[2],m_pos_y[1])
+  ui_utils.edit_icon(m_pos_x[1],m_pos_y[1])
+  ui_utils.sync_icon(m_pos_x[2],m_pos_y[1])
   if not presets_menu then
-    draw_cursor(c_pos_x,c_pos_y)
+    ui_utils.cursor(c_pos_x,c_pos_y)
   end
   if presets_menu then
     screen.level(4)
@@ -651,11 +374,11 @@ function redraw()
     if depth == 3 then
       draw_meta()
       draw_options(10,55)
-      draw_cursor(c_pos_x,c_pos_y)
+      ui_utils.cursor(c_pos_x,c_pos_y)
     end
   elseif backup_menu then
-    draw_album_icon()
-    draw_tape_icon(75,tape_pos_y)
+    ui_utils.album_icon(30,20,lp_pos)
+    ui_utils.tape(75,tape_pos_y)
   end
   screen.update()
 end
