@@ -16,4 +16,4 @@ jobs:
       - uses: actions/checkout@v2
       - uses: nebularg/actions-luacheck@v1
         with:
-          args: -o 011
+         # args: -o 011
